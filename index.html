@@ -1,0 +1,1308 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1a3a">
+<title>Tài chính Sinh viên</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script>
+tailwind.config = {
+  theme: { extend: {
+    fontFamily: { sans: ['"Be Vietnam Pro"', 'system-ui', 'sans-serif'] },
+    colors: { navy: { 50:'#f1f4fa', 100:'#e1e7f3', 200:'#c3cfe6', 500:'#3a5a9b', 600:'#274582', 700:'#1b3366', 800:'#13264d', 900:'#0b1a3a' } }
+  } }
+};
+</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  /* iOS Safari tự zoom khi focus vào ô nhập có font < 16px */
+  input, select { font-size: 16px; }
+
+  /* Bảng cổ phiếu: dưới 768px chuyển mỗi hàng thành một thẻ, không cần cuộn ngang */
+  @media (max-width: 767px) {
+    .stock-table, .stock-table tbody, .stock-table tfoot, .stock-table tr, .stock-table td { display: block; }
+    .stock-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    .stock-table tbody tr, .stock-table tfoot tr { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; padding: 14px 16px; }
+    .stock-table td { padding: 0 !important; text-align: left !important; }
+    .stock-table td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 12px; font-weight: 400; color: #3a5a9b; }
+    .stock-table td[data-col="sym"], .stock-table td[data-col="act"],
+    .stock-table td[data-col="totTitle"], .stock-table td[data-col="totPL"] { grid-column: 1 / -1; }
+    .stock-table td[data-col="totEmpty"] { display: none; }
+    .stock-table td[data-col="sym"] { font-size: 16px; }
+  }
+  .bar { transition: width .4s ease, background-color .3s ease; }
+  :focus-visible { outline: 2px solid #274582; outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { .bar { transition: none; } }
+</style>
+</head>
+<body class="bg-navy-50 font-sans text-navy-900 antialiased">
+
+<!-- Sidebar (desktop) -->
+<aside class="hidden md:flex fixed inset-y-0 left-0 w-60 flex-col bg-navy-900 text-white p-5">
+  <div class="mb-8">
+    <p class="text-lg font-bold">Quỹ Sinh viên</p>
+    <p class="text-xs text-navy-200">Quản lý tiền theo tỷ lệ của riêng bạn</p>
+  </div>
+  <nav class="flex flex-col gap-1" id="sideNav"></nav>
+</aside>
+
+<!-- Bottom nav (mobile) -->
+<nav class="md:hidden fixed bottom-0 inset-x-0 z-20 bg-white border-t border-navy-100 grid grid-cols-3" id="bottomNav" style="padding-bottom: env(safe-area-inset-bottom, 0px)"></nav>
+
+<main class="md:ml-60 px-4 py-6 pb-28 md:pb-10 md:px-10 max-w-5xl">
+
+  <div id="storageBanner" class="hidden mb-4 rounded-lg bg-amber-50 border border-amber-300 text-amber-800 text-sm px-4 py-3" role="alert">
+    Không lưu được dữ liệu vào trình duyệt. Hãy tắt chế độ riêng tư hoặc giải phóng dung lượng, nếu không dữ liệu sẽ mất khi đóng trang.
+  </div>
+
+  <!-- TAB 1: NGÂN SÁCH -->
+  <section id="tab-budget" class="space-y-6">
+    <header>
+      <h1 class="text-2xl font-bold">Ngân sách</h1>
+      <p class="text-sm text-navy-500">Nhập số dư đầu tháng, ghi lại thu chi và theo dõi từng nhóm chi tiêu.</p>
+    </header>
+
+    <!-- Tổng quan -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div class="col-span-2 lg:col-span-1 bg-navy-800 text-white rounded-xl p-4">
+        <p class="text-xs text-navy-200">Số dư hiện tại</p>
+        <p id="sumBalance" class="text-2xl font-bold mt-1">0 ₫</p>
+      </div>
+      <div class="bg-white rounded-xl p-4 border border-navy-100">
+        <p class="text-xs text-navy-500">Tổng thu</p>
+        <p id="sumIncome" class="text-lg font-semibold mt-1 text-emerald-700">0 ₫</p>
+      </div>
+      <div class="bg-white rounded-xl p-4 border border-navy-100">
+        <p class="text-xs text-navy-500">Tổng chi</p>
+        <p id="sumExpense" class="text-lg font-semibold mt-1 text-navy-800">0 ₫</p>
+      </div>
+      <div class="col-span-2 lg:col-span-1 bg-white rounded-xl p-4 border border-navy-100">
+        <p class="text-xs text-navy-500">Ngân sách để phân bổ</p>
+        <p id="sumPool" class="text-lg font-semibold mt-1">0 ₫</p>
+      </div>
+    </div>
+
+    <div class="grid lg:grid-cols-5 gap-6">
+      <!-- Cột trái: form -->
+      <div class="lg:col-span-2 space-y-6">
+        <form id="openingForm" class="bg-white rounded-xl p-5 border border-navy-100 space-y-3" novalidate>
+          <h2 class="font-semibold">Số dư đầu tháng</h2>
+          <div>
+            <label for="openingInput" class="block text-sm text-navy-600 mb-1">Số tiền (₫)</label>
+            <input id="openingInput" type="text" inputmode="numeric" autocomplete="off" placeholder="Ví dụ: 5.000.000"
+              class="w-full rounded-lg border border-navy-200 px-3 py-2.5 focus:border-navy-600">
+          </div>
+          <button type="submit" class="w-full rounded-lg bg-navy-700 hover:bg-navy-800 text-white font-medium py-2.5">Lưu số dư</button>
+        </form>
+
+        <form id="txForm" class="bg-white rounded-xl p-5 border border-navy-100 space-y-3" novalidate>
+          <h2 class="font-semibold">Thêm khoản thu / chi</h2>
+          <div class="grid grid-cols-2 gap-1 p-1 bg-navy-50 rounded-lg" role="group" aria-label="Loại giao dịch">
+            <button type="button" data-type="expense" class="typeBtn rounded-md py-2 text-sm font-medium">Chi</button>
+            <button type="button" data-type="income" class="typeBtn rounded-md py-2 text-sm font-medium">Thu</button>
+          </div>
+          <div>
+            <label for="amountInput" class="block text-sm text-navy-600 mb-1">Số tiền (₫)</label>
+            <input id="amountInput" type="text" inputmode="numeric" autocomplete="off" placeholder="Ví dụ: 45.000"
+              class="w-full rounded-lg border border-navy-200 px-3 py-2.5 focus:border-navy-600">
+          </div>
+          <div id="groupWrap">
+            <label for="groupSelect" class="block text-sm text-navy-600 mb-1">Nhóm chi tiêu</label>
+            <select id="groupSelect" class="w-full rounded-lg border border-navy-200 px-3 py-2.5 bg-white focus:border-navy-600">
+              <option value="essential">Thiết yếu (ăn uống, trọ, đi lại, học phí)</option>
+              <option value="flex">Linh hoạt (cà phê, giải trí, mua sắm)</option>
+              <option value="saving">Tiết kiệm (quỹ dự phòng, đầu tư)</option>
+            </select>
+          </div>
+          <div>
+            <label for="noteInput" class="block text-sm text-navy-600 mb-1">Ghi chú</label>
+            <input id="noteInput" type="text" maxlength="80" placeholder="Ví dụ: Cơm trưa"
+              class="w-full rounded-lg border border-navy-200 px-3 py-2.5 focus:border-navy-600">
+          </div>
+          <div>
+            <label for="dateInput" class="block text-sm text-navy-600 mb-1">Ngày</label>
+            <input id="dateInput" type="date" class="w-full rounded-lg border border-navy-200 px-3 py-2.5 focus:border-navy-600">
+          </div>
+          <p id="formError" class="text-sm text-red-600 min-h-[1.25rem]" role="alert"></p>
+          <button type="submit" class="w-full rounded-lg bg-navy-700 hover:bg-navy-800 text-white font-medium py-2.5">Thêm giao dịch</button>
+        </form>
+      </div>
+
+      <!-- Cột phải: phân bổ + lịch sử -->
+      <div class="lg:col-span-3 space-y-6">
+        <div class="bg-white rounded-xl p-5 border border-navy-100">
+          <h2 class="font-semibold">Phân bổ <span id="splitLabel">50/30/20</span></h2>
+          <p id="allocHint" class="text-sm text-navy-500 mb-4">Ngân sách = số dư đầu tháng + tổng thu.</p>
+          <div id="groups" class="space-y-5"></div>
+
+          <details class="mt-5 border-t border-navy-100 pt-4">
+            <summary class="cursor-pointer text-sm font-medium text-navy-700">Tùy chỉnh tỷ lệ phân bổ</summary>
+            <form id="splitForm" class="mt-3 space-y-3" novalidate>
+              <div class="grid grid-cols-3 gap-3">
+                <div>
+                  <label for="splitEssential" class="block text-xs text-navy-600 mb-1">Thiết yếu (%)</label>
+                  <input id="splitEssential" type="text" inputmode="numeric" autocomplete="off" maxlength="3" class="w-full rounded-lg border border-navy-200 px-3 py-2.5 focus:border-navy-600">
+                </div>
+                <div>
+                  <label for="splitFlex" class="block text-xs text-navy-600 mb-1">Linh hoạt (%)</label>
+                  <input id="splitFlex" type="text" inputmode="numeric" autocomplete="off" maxlength="3" class="w-full rounded-lg border border-navy-200 px-3 py-2.5 focus:border-navy-600">
+                </div>
+                <div>
+                  <label for="splitSaving" class="block text-xs text-navy-600 mb-1">Tiết kiệm (%)</label>
+                  <input id="splitSaving" type="text" inputmode="numeric" autocomplete="off" maxlength="3" class="w-full rounded-lg border border-navy-200 px-3 py-2.5 focus:border-navy-600">
+                </div>
+              </div>
+              <p id="splitTotal" class="text-sm" role="status"></p>
+              <div class="flex flex-wrap gap-2">
+                <button id="splitApply" type="submit" class="rounded-lg bg-navy-700 hover:bg-navy-800 text-white px-4 py-2 text-sm font-medium">Áp dụng</button>
+                <button id="splitReset" type="button" class="rounded-lg border border-navy-200 text-navy-700 hover:bg-navy-50 px-4 py-2 text-sm font-medium">Đặt lại 50/30/20</button>
+              </div>
+            </form>
+          </details>
+        </div>
+
+        <div class="bg-white rounded-xl p-5 border border-navy-100">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="font-semibold">Lịch sử giao dịch</h2>
+            <button id="clearAll" type="button" class="text-sm text-red-600 hover:underline">Xóa toàn bộ</button>
+          </div>
+          <ul id="history" class="divide-y divide-navy-100"></ul>
+          <p id="emptyHistory" class="text-sm text-navy-500 py-6 text-center">Chưa có giao dịch. Thêm khoản đầu tiên ở form bên trái.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB 2 -->
+  <section id="tab-goals" class="hidden space-y-6">
+    <header>
+      <h1 class="text-2xl font-bold">Mục tiêu &amp; Lãi kép</h1>
+      <p class="text-sm text-navy-500">Xem tiền tiết kiệm mỗi tháng tăng trưởng thế nào cho đến khi chạm mục tiêu.</p>
+    </header>
+
+    <div class="grid lg:grid-cols-5 gap-6">
+      <form id="goalForm" class="lg:col-span-2 bg-white rounded-xl p-5 border border-navy-100 space-y-3 self-start" novalidate>
+        <h2 class="font-semibold">Thông tin mục tiêu</h2>
+        <div>
+          <label for="goalName" class="block text-sm text-navy-600 mb-1">Tên mục tiêu</label>
+          <input id="goalName" type="text" maxlength="40" placeholder="Ví dụ: Mua laptop"
+            class="w-full rounded-lg border border-navy-200 px-3 py-2.5 focus:border-navy-600">
+        </div>
+        <div>
+          <label for="goalTarget" class="block text-sm text-navy-600 mb-1">Số tiền cần đạt (₫)</label>
+          <input id="goalTarget" type="text" inputmode="numeric" autocomplete="off" placeholder="Ví dụ: 25.000.000"
+            class="w-full rounded-lg border border-navy-200 px-3 py-2.5 focus:border-navy-600">
+        </div>
+        <div>
+          <label for="goalMonthly" class="block text-sm text-navy-600 mb-1">Số tiền tiết kiệm mỗi tháng (₫)</label>
+          <input id="goalMonthly" type="text" inputmode="numeric" autocomplete="off" placeholder="Ví dụ: 1.000.000"
+            class="w-full rounded-lg border border-navy-200 px-3 py-2.5 focus:border-navy-600">
+        </div>
+        <div>
+          <label for="goalRate" class="block text-sm text-navy-600 mb-1">Lãi suất dự kiến (%/năm)</label>
+          <input id="goalRate" type="text" inputmode="decimal" autocomplete="off" placeholder="Ví dụ: 6"
+            class="w-full rounded-lg border border-navy-200 px-3 py-2.5 focus:border-navy-600">
+        </div>
+        <p id="goalError" class="text-sm text-red-600 min-h-[1.25rem]" role="alert"></p>
+        <button type="submit" class="w-full rounded-lg bg-navy-700 hover:bg-navy-800 text-white font-medium py-2.5">Tính và lưu mục tiêu</button>
+      </form>
+
+      <div class="lg:col-span-3 space-y-6">
+        <div class="bg-white rounded-xl p-5 border border-navy-100">
+          <h2 id="goalTitle" class="font-semibold">Kết quả</h2>
+          <p id="goalResult" class="text-sm text-navy-600 mt-1">Nhập thông tin bên trái để xem dự báo.</p>
+          <dl id="goalStats" class="hidden grid grid-cols-3 gap-3 mt-4 text-sm">
+            <div><dt class="text-xs text-navy-500">Tiền gốc đã nộp</dt><dd id="statPrincipal" class="font-semibold mt-0.5"></dd></div>
+            <div><dt class="text-xs text-navy-500">Tiền lãi</dt><dd id="statInterest" class="font-semibold mt-0.5 text-emerald-700"></dd></div>
+            <div><dt class="text-xs text-navy-500">Tổng tài sản</dt><dd id="statTotal" class="font-semibold mt-0.5"></dd></div>
+          </dl>
+        </div>
+        <div class="bg-white rounded-xl p-5 border border-navy-100">
+          <h2 class="font-semibold mb-3">Tăng trưởng qua các năm</h2>
+          <div class="relative h-72">
+            <canvas id="goalChart" role="img" aria-label="Biểu đồ đường tăng trưởng tài sản qua các năm"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB 3 -->
+  <section id="tab-stocks" class="hidden space-y-6">
+    <header class="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h1 class="text-2xl font-bold">Danh mục Đầu tư</h1>
+        <p class="text-sm text-navy-500">Theo dõi các mã cổ phiếu Việt Nam bạn quan tâm. Giá tự cập nhật, bạn nhập tay khi không lấy được giá.</p>
+      </div>
+      <button id="refreshPrices" type="button" class="rounded-lg bg-navy-700 hover:bg-navy-800 disabled:opacity-60 text-white text-sm font-medium px-4 py-2.5">Cập nhật giá</button>
+    </header>
+
+    <div>
+      <form id="addStockForm" class="bg-white rounded-xl border border-navy-100 p-4 flex flex-col sm:flex-row gap-3" novalidate>
+        <div class="flex-1">
+          <label for="symbolInput" class="sr-only">Mã cổ phiếu</label>
+          <input id="symbolInput" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="10"
+            placeholder="Nhập mã cổ phiếu (VD: FPT, HPG)"
+            class="w-full rounded-lg border border-navy-200 px-3 py-2.5 focus:border-navy-600">
+        </div>
+        <button type="submit" class="rounded-lg bg-navy-700 hover:bg-navy-800 text-white font-medium px-5 py-2.5">Thêm mã</button>
+      </form>
+      <p id="stockAddError" class="text-sm text-red-600 min-h-[1.25rem] mt-2" role="alert"></p>
+    </div>
+
+    <p id="stockStatus" class="text-sm text-navy-600 min-h-[1.25rem]" role="status"></p>
+
+    <div id="stockEmpty" class="bg-white rounded-xl border border-dashed border-navy-200 p-8 text-center text-sm text-navy-600">
+      Danh mục đang trống. Nhập mã cổ phiếu ở trên rồi bấm "Thêm mã" để bắt đầu theo dõi.
+    </div>
+
+    <div id="stockTableWrap" class="hidden bg-white rounded-xl border border-navy-100 overflow-x-auto">
+      <table class="stock-table w-full text-sm md:min-w-[760px]">
+        <thead class="bg-navy-50 text-navy-600 text-left">
+          <tr>
+            <th class="px-4 py-3 font-medium">Mã CP</th>
+            <th class="px-2 py-3 font-medium">Giá vốn (₫)</th>
+            <th class="px-2 py-3 font-medium">Số lượng</th>
+            <th class="px-2 py-3 font-medium">Giá hiện tại (₫)</th>
+            <th class="px-2 py-3 font-medium">% Lãi/Lỗ</th>
+            <th class="px-4 py-3 font-medium">Hành động</th>
+          </tr>
+        </thead>
+        <tbody id="stockBody" class="divide-y divide-navy-100"></tbody>
+        <tfoot class="bg-navy-50 font-semibold">
+          <tr>
+            <td class="px-4 py-3" data-col="totTitle">Tổng danh mục</td>
+            <td class="px-2 py-3" colspan="2" data-label="Vốn"><span id="totCost"></span></td>
+            <td class="px-2 py-3" data-label="Giá trị hiện tại"><span id="totValue"></span></td>
+            <td id="totPL" class="px-2 py-3" data-col="totPL" data-label="Lãi/Lỗ tổng"></td>
+            <td class="px-4 py-3" data-col="totEmpty"></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    <p class="text-xs text-navy-500">Giá nhập theo đơn vị đồng (ví dụ 27.500, không phải 27,5). Thông tin chỉ mang tính theo dõi, không phải khuyến nghị đầu tư.</p>
+
+    <!-- KHUYẾN NGHỊ (affiliate): thay href="#" bằng link affiliate của bạn -->
+    <div class="pt-4">
+      <div class="flex flex-wrap items-baseline justify-between gap-x-3">
+        <h2 class="text-lg font-bold">Khuyến nghị</h2>
+        <p class="text-xs text-navy-500">Liên kết tiếp thị</p>
+      </div>
+      <p class="text-sm text-navy-600 mt-1">Muốn giao dịch thật? Mở tài khoản chứng khoán và bắt đầu với số vốn nhỏ.</p>
+
+      <div class="grid gap-3 mt-4 md:grid-cols-3">
+        <article class="flex flex-col rounded-xl border border-navy-100 border-t-4 border-t-navy-700 bg-white p-5">
+          <div class="flex items-center gap-3">
+            <span class="grid place-items-center w-10 h-10 rounded-full bg-navy-800 text-white text-sm font-bold" aria-hidden="true">TC</span>
+            <h3 class="font-semibold">TCBS</h3>
+          </div>
+          <p class="mt-4 font-semibold leading-snug">Mở tài khoản giao dịch miễn phí</p>
+          <p class="text-sm text-navy-600 mt-1">Ưu đãi cho sinh viên</p>
+          <a href="#" data-broker="TCBS" target="_blank" rel="sponsored noopener noreferrer"
+             class="affLink mt-5 inline-flex items-center justify-center rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-semibold px-4 py-3">Mở tài khoản TCBS</a>
+        </article>
+
+        <article class="flex flex-col rounded-xl border border-navy-100 border-t-4 border-t-navy-700 bg-white p-5">
+          <div class="flex items-center gap-3">
+            <span class="grid place-items-center w-10 h-10 rounded-full bg-navy-800 text-white text-sm font-bold" aria-hidden="true">VN</span>
+            <h3 class="font-semibold">VNDIRECT</h3>
+          </div>
+          <p class="mt-4 font-semibold leading-snug">Mở tài khoản giao dịch miễn phí</p>
+          <p class="text-sm text-navy-600 mt-1">Ưu đãi cho sinh viên</p>
+          <a href="#" data-broker="VNDIRECT" target="_blank" rel="sponsored noopener noreferrer"
+             class="affLink mt-5 inline-flex items-center justify-center rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-semibold px-4 py-3">Mở tài khoản VNDIRECT</a>
+        </article>
+
+        <article class="flex flex-col rounded-xl border border-navy-100 border-t-4 border-t-navy-700 bg-white p-5">
+          <div class="flex items-center gap-3">
+            <span class="grid place-items-center w-10 h-10 rounded-full bg-navy-800 text-white text-sm font-bold" aria-hidden="true">CK</span>
+            <h3 class="font-semibold">Cake by VPBank</h3>
+          </div>
+          <p class="mt-4 font-semibold leading-snug">Mở tài khoản giao dịch miễn phí</p>
+          <p class="text-sm text-navy-600 mt-1">Ưu đãi cho sinh viên</p>
+          <a href="#" data-broker="Cake by VPBank" target="_blank" rel="sponsored noopener noreferrer"
+             class="affLink mt-5 inline-flex items-center justify-center rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-semibold px-4 py-3">Mở tài khoản Cake</a>
+        </article>
+      </div>
+
+      <p class="text-xs text-navy-500 mt-3">Công bố: chúng tôi có thể nhận hoa hồng khi bạn mở tài khoản qua các liên kết này, bạn không phải trả thêm phí. Hãy tự tìm hiểu điều kiện ưu đãi và biểu phí của từng công ty trước khi đăng ký.</p>
+    </div>
+  </section>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  /* BẢN ĐỒ MÃ NGUỒN
+     1. Cấu hình API giá cổ phiếu        4. Điều hướng tab
+     2. Hằng số & tiện ích               5. Tab 1: Ngân sách
+     3. Lưu trữ (localStorage)           6. Tab 2: Mục tiêu & lãi kép
+                                         7. Tab 3: Danh mục đầu tư (+ affiliate)
+                                         8. Khởi tạo (init) */
+
+  /* ---------- Cấu hình lấy giá cổ phiếu Việt Nam (API công khai của TCBS) ---------- */
+  var CORS_PROXY = 'https://api.allorigins.win/get?url=';  // Bọc URL để vượt CORS; đặt '' nếu gọi trực tiếp
+  var PRICE_URL = function (sym) {                          // Endpoint TCBS cho từng mã
+    return 'https://apipubaws.tcbs.com.vn/tcanalysis/v1/ticker/' + encodeURIComponent(sym) + '/overview';
+  };
+  var PRICE_KEYS = ['price', 'closePrice', 'matchPrice', 'lastPrice', 'close']; // Tên trường được coi là "giá hiện tại"
+  var PRICE_SCALE = 1;                                      // Nếu API trả giá theo nghìn đồng (27.5), đặt 1000
+
+  /* ---------- Hằng số & tiện ích ---------- */
+  var MAX_SYMBOLS = 30; // Số mã tối đa trong danh mục
+  var STORAGE_KEY = 'sfin_budget_v1';
+  var MAX_AMOUNT = 1e12;
+  var WARN_AT = 0.85; // nhóm Thiết yếu >= 85% => đỏ cảnh báo
+  var GROUPS = [
+    { id: 'essential', name: 'Thiết yếu' },
+    { id: 'flex',      name: 'Linh hoạt' },
+    { id: 'saving',    name: 'Tiết kiệm' }
+  ];
+  var DEFAULT_SPLIT = { essential: 50, flex: 30, saving: 20 }; // Tỷ lệ mặc định (%), người dùng có thể đổi
+  var GROUP_NAME = { essential: 'Thiết yếu', flex: 'Linh hoạt', saving: 'Tiết kiệm' };
+
+  var $ = function (id) { return document.getElementById(id); };
+  var fmt = new Intl.NumberFormat('vi-VN');
+  var money = function (n) { return fmt.format(Math.round(n)) + ' ₫'; };
+
+  function digitsOnly(s) { return String(s).replace(/\D/g, '').slice(0, 13); }
+  function toNumber(s) { var d = digitsOnly(s); return d ? Math.min(parseInt(d, 10), MAX_AMOUNT) : 0; }
+  function todayISO() {
+    var d = new Date(), p = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  function newId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+
+  /* ---------- Lưu trữ an toàn ---------- */
+  function emptyGoal() { return { name: '', target: 0, monthly: 0, rate: 0 }; }
+  function emptyState() { return { opening: 0, transactions: [], goal: emptyGoal(), stocks: [], split: Object.assign({}, DEFAULT_SPLIT) }; }
+
+  function loadState() {
+    var state = emptyState();
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return state;
+      var data = JSON.parse(raw);
+      if (!data || typeof data !== 'object') return state;
+      var op = Number(data.opening);
+      state.opening = isFinite(op) && op >= 0 ? Math.min(op, MAX_AMOUNT) : 0;
+      if (Array.isArray(data.transactions)) {
+        state.transactions = data.transactions.filter(function (t) {
+          return t && (t.type === 'income' || t.type === 'expense') &&
+                 isFinite(Number(t.amount)) && Number(t.amount) > 0 &&
+                 (t.type === 'income' || GROUP_NAME[t.group]);
+        }).map(function (t) {
+          return {
+            id: String(t.id || newId()),
+            type: t.type,
+            amount: Math.min(Number(t.amount), MAX_AMOUNT),
+            group: t.type === 'expense' ? t.group : null,
+            note: String(t.note || '').slice(0, 80),
+            date: /^\d{4}-\d{2}-\d{2}$/.test(t.date) ? t.date : todayISO()
+          };
+        });
+      }
+      if (data.goal && typeof data.goal === 'object') {
+        var g = data.goal, num = function (v, max) { v = Number(v); return isFinite(v) && v >= 0 ? Math.min(v, max) : 0; };
+        state.goal = {
+          name: String(g.name || '').slice(0, 40),
+          target: num(g.target, MAX_AMOUNT),
+          monthly: num(g.monthly, MAX_AMOUNT),
+          rate: num(g.rate, 100)
+        };
+      }
+      // Tỷ lệ phân bổ: 3 số nguyên 0-100 và tổng đúng 100, nếu không thì dùng mặc định
+      if (data.split && typeof data.split === 'object') {
+        var sp = { essential: Math.round(Number(data.split.essential)), flex: Math.round(Number(data.split.flex)), saving: Math.round(Number(data.split.saving)) };
+        var spOk = [sp.essential, sp.flex, sp.saving].every(function (v) { return isFinite(v) && v >= 0 && v <= 100; });
+        if (spOk && sp.essential + sp.flex + sp.saving === 100) state.split = sp;
+      }
+      // Danh mục: mảng { symbol, avg, qty, price, source }. Tự chuyển dữ liệu bản cũ (object theo mã) sang mảng.
+      var rawStocks = data.stocks, list = [];
+      var toNum = function (v) { v = Number(v); return isFinite(v) && v >= 0 ? Math.min(v, MAX_AMOUNT) : 0; };
+      if (Array.isArray(rawStocks)) list = rawStocks;
+      else if (rawStocks && typeof rawStocks === 'object') {
+        list = Object.keys(rawStocks).map(function (k) {
+          var o = rawStocks[k] || {};
+          return { symbol: k, avg: o.avg, qty: o.qty, price: o.price, source: o.source };
+        }).filter(function (o) { return toNum(o.avg) > 0 || toNum(o.qty) > 0 || toNum(o.price) > 0; });
+      }
+      var seen = {};
+      list.forEach(function (d) {
+        if (!d || typeof d !== 'object') return;
+        var sym = normalizeSymbol(d.symbol);
+        if (!sym || seen[sym] || state.stocks.length >= MAX_SYMBOLS) return;
+        seen[sym] = true;
+        var price = toNum(d.price);
+        state.stocks.push({
+          symbol: sym, avg: toNum(d.avg), qty: toNum(d.qty), price: price,
+          source: price > 0 && (d.source === 'api' || d.source === 'manual') ? d.source : ''
+        });
+      });
+    } catch (e) { /* dữ liệu hỏng hoặc localStorage bị chặn: bắt đầu mới */ }
+    return state;
+  }
+
+  // Hiện/ẩn banner cảnh báo khi trình duyệt không cho ghi localStorage (dùng chung cho cả 3 tab)
+  function setStorageWarning(on) { $('storageBanner').classList.toggle('hidden', !on); }
+
+  function saveState() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); setStorageWarning(false); return true; }
+    catch (e) { setStorageWarning(true); return false; }
+  }
+
+  var state = loadState();
+  var currentType = 'expense';
+
+  /* ---------- Điều hướng tab ---------- */
+  var TABS = [
+    { id: 'budget', label: 'Ngân sách', icon: 'M3 7h18M3 12h18M3 17h12' },
+    { id: 'goals',  label: 'Mục tiêu',  icon: 'M12 3v3m0 12v3M3 12h3m12 0h3M12 8a4 4 0 100 8 4 4 0 000-8z' },
+    { id: 'stocks', label: 'Danh mục',  icon: 'M3 17l6-6 4 4 8-8M15 7h6v6' }
+  ];
+
+  function iconSvg(path) {
+    return '<svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="' + path + '"/></svg>';
+  }
+
+  function buildNav() {
+    var side = $('sideNav'), bottom = $('bottomNav');
+    TABS.forEach(function (t) {
+      var a = document.createElement('button');
+      a.type = 'button'; a.dataset.tab = t.id;
+      a.className = 'navBtn side flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-left text-white';
+      a.innerHTML = iconSvg(t.icon) + '<span>' + t.label + '</span>';
+      side.appendChild(a);
+
+      var b = document.createElement('button');
+      b.type = 'button'; b.dataset.tab = t.id;
+      b.className = 'navBtn bottom flex flex-col items-center gap-1 py-2.5 text-xs font-medium';
+      b.innerHTML = iconSvg(t.icon) + '<span>' + t.label + '</span>';
+      bottom.appendChild(b);
+    });
+    document.querySelectorAll('.navBtn').forEach(function (btn) {
+      btn.addEventListener('click', function () { showTab(btn.dataset.tab); });
+    });
+  }
+
+  function showTab(id) {
+    TABS.forEach(function (t) { $('tab-' + t.id).classList.toggle('hidden', t.id !== id); });
+    document.querySelectorAll('.navBtn').forEach(function (btn) {
+      var active = btn.dataset.tab === id;
+      btn.setAttribute('aria-current', active ? 'page' : 'false');
+      if (btn.classList.contains('side')) {
+        btn.classList.toggle('bg-navy-700', active);
+        btn.classList.toggle('opacity-70', !active);
+      } else {
+        btn.classList.toggle('text-navy-700', active);
+        btn.classList.toggle('text-navy-500', !active);
+      }
+    });
+    window.scrollTo(0, 0);
+    if (id === 'goals') onGoalsShown();
+    if (id === 'stocks') onStocksShown();
+  }
+
+  /* ---------- Form: chỉ cho nhập số ---------- */
+  function bindMoneyInput(el) {
+    el.addEventListener('input', function () {
+      var d = digitsOnly(el.value);
+      el.value = d ? fmt.format(parseInt(d, 10)) : '';
+    });
+    el.addEventListener('keydown', function (e) {
+      var ok = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
+      if (e.ctrlKey || e.metaKey || ok.indexOf(e.key) > -1) return;
+      if (e.key.length === 1 && !/\d/.test(e.key)) e.preventDefault();
+    });
+    el.addEventListener('paste', function (e) {
+      e.preventDefault();
+      var text = (e.clipboardData || window.clipboardData).getData('text');
+      var d = digitsOnly(text);
+      if (d) { el.value = fmt.format(parseInt(d, 10)); }
+    });
+  }
+
+  function showError(msg) { $('formError').textContent = msg || ''; }
+
+  function setType(type) {
+    currentType = type;
+    document.querySelectorAll('.typeBtn').forEach(function (b) {
+      var on = b.dataset.type === type;
+      b.classList.toggle('bg-white', on);
+      b.classList.toggle('shadow-sm', on);
+      b.classList.toggle('text-navy-800', on);
+      b.classList.toggle('text-navy-500', !on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    $('groupWrap').classList.toggle('hidden', type === 'income');
+  }
+
+  /* ---------- Tính toán ---------- */
+  function totals() {
+    var income = 0, expense = 0, byGroup = { essential: 0, flex: 0, saving: 0 };
+    state.transactions.forEach(function (t) {
+      if (t.type === 'income') income += t.amount;
+      else { expense += t.amount; byGroup[t.group] += t.amount; }
+    });
+    return { income: income, expense: expense, byGroup: byGroup,
+             balance: state.opening + income - expense,
+             pool: state.opening + income };
+  }
+
+  /* ---------- Hiển thị ---------- */
+  function render() {
+    var t = totals();
+    $('sumBalance').textContent = money(t.balance);
+    $('sumIncome').textContent = money(t.income);
+    $('sumExpense').textContent = money(t.expense);
+    $('sumPool').textContent = money(t.pool);
+    $('splitLabel').textContent = state.split.essential + '/' + state.split.flex + '/' + state.split.saving;
+
+    // Nhóm ngân sách
+    var wrap = $('groups');
+    wrap.innerHTML = '';
+    GROUPS.forEach(function (g) {
+      var limit = t.pool * (state.split[g.id] / 100);
+      var spent = t.byGroup[g.id];
+      var ratio = limit > 0 ? spent / limit : (spent > 0 ? 1.01 : 0);
+      var pct = Math.round(ratio * 100);
+      var color, status = '';
+
+      if (g.id === 'saving') {
+        color = 'bg-emerald-600';
+        status = ratio >= 1 ? 'Đã đạt mục tiêu tiết kiệm' : '';
+      } else if (g.id === 'essential') {
+        if (ratio > 1) { color = 'bg-red-600'; status = 'Đã vượt ngân sách thiết yếu ' + money(spent - limit); }
+        else if (ratio >= WARN_AT) { color = 'bg-red-600'; status = 'Sắp vượt: còn ' + money(limit - spent); }
+        else color = 'bg-navy-600';
+      } else {
+        if (ratio > 1) { color = 'bg-amber-600'; status = 'Đã vượt ' + money(spent - limit); }
+        else color = 'bg-navy-500';
+      }
+
+      var row = document.createElement('div');
+      var head = document.createElement('div');
+      head.className = 'flex items-baseline justify-between gap-2 text-sm';
+      var l = document.createElement('span');
+      l.className = 'font-medium';
+      l.textContent = g.name + ' (' + state.split[g.id] + '%)';
+      var r = document.createElement('span');
+      r.className = 'text-navy-600 text-right';
+      r.textContent = money(spent) + ' / ' + money(limit);
+      head.appendChild(l); head.appendChild(r);
+
+      var track = document.createElement('div');
+      track.className = 'mt-2 h-3 rounded-full bg-navy-100 overflow-hidden';
+      track.setAttribute('role', 'progressbar');
+      track.setAttribute('aria-label', g.name);
+      track.setAttribute('aria-valuemin', '0');
+      track.setAttribute('aria-valuemax', '100');
+      track.setAttribute('aria-valuenow', String(Math.min(pct, 100)));
+      var fill = document.createElement('div');
+      fill.className = 'bar h-full rounded-full ' + color;
+      fill.style.width = Math.min(pct, 100) + '%';
+      track.appendChild(fill);
+
+      var foot = document.createElement('div');
+      foot.className = 'mt-1 flex justify-between text-xs';
+      var p = document.createElement('span');
+      p.className = 'text-navy-500';
+      p.textContent = pct + '% ' + (g.id === 'saving' ? 'đã tiết kiệm' : 'đã chi');
+      var s = document.createElement('span');
+      s.className = (g.id === 'essential' && ratio >= WARN_AT) ? 'text-red-600 font-medium' : 'text-navy-500';
+      s.textContent = status;
+      foot.appendChild(p); foot.appendChild(s);
+
+      row.appendChild(head); row.appendChild(track); row.appendChild(foot);
+      wrap.appendChild(row);
+    });
+
+    if (t.pool <= 0) $('allocHint').textContent = 'Nhập số dư đầu tháng hoặc một khoản thu để bắt đầu phân bổ. Ngân sách = số dư đầu tháng + tổng thu.';
+    else $('allocHint').textContent = 'Ngân sách = số dư đầu tháng + tổng thu = ' + money(t.pool) + '.';
+
+    // Lịch sử
+    var ul = $('history');
+    ul.innerHTML = '';
+    var list = state.transactions.slice().sort(function (a, b) {
+      return a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
+    });
+    $('emptyHistory').classList.toggle('hidden', list.length > 0);
+    $('clearAll').classList.toggle('hidden', list.length === 0);
+
+    list.forEach(function (tx) {
+      var li = document.createElement('li');
+      li.className = 'flex items-center justify-between gap-3 py-3';
+
+      var left = document.createElement('div');
+      left.className = 'min-w-0';
+      var title = document.createElement('p');
+      title.className = 'text-sm font-medium truncate';
+      title.textContent = tx.note || (tx.type === 'income' ? 'Khoản thu' : 'Khoản chi');
+      var meta = document.createElement('p');
+      meta.className = 'text-xs text-navy-500';
+      var d = tx.date.split('-');
+      meta.textContent = d[2] + '/' + d[1] + '/' + d[0] + (tx.type === 'expense' ? ' – ' + GROUP_NAME[tx.group] : ' – Thu nhập');
+      left.appendChild(title); left.appendChild(meta);
+
+      var right = document.createElement('div');
+      right.className = 'flex items-center gap-3 shrink-0';
+      var amt = document.createElement('span');
+      amt.className = 'text-sm font-semibold ' + (tx.type === 'income' ? 'text-emerald-700' : 'text-navy-800');
+      amt.textContent = (tx.type === 'income' ? '+' : '−') + money(tx.amount);
+      var del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'text-xs text-red-600 hover:underline';
+      del.textContent = 'Xóa';
+      del.setAttribute('aria-label', 'Xóa giao dịch ' + title.textContent);
+      del.addEventListener('click', function () {
+        state.transactions = state.transactions.filter(function (x) { return x.id !== tx.id; });
+        saveState(); render();
+      });
+      right.appendChild(amt); right.appendChild(del);
+
+      li.appendChild(left); li.appendChild(right);
+      ul.appendChild(li);
+    });
+  }
+
+  /* ---------- Tab 1: Tỷ lệ phân bổ tùy chỉnh ---------- */
+  var SPLIT_INPUTS = { essential: 'splitEssential', flex: 'splitFlex', saving: 'splitSaving' };
+
+  /** Đọc 3 ô tỷ lệ: trả về giá trị từng nhóm (số nguyên 0-100) và tổng. */
+  function readSplitInputs() {
+    var values = {}, sum = 0;
+    Object.keys(SPLIT_INPUTS).forEach(function (k) {
+      var v = parseInt(digitsOnly($(SPLIT_INPUTS[k]).value), 10);
+      values[k] = isFinite(v) ? Math.min(v, 100) : 0;
+      sum += values[k];
+    });
+    return { values: values, sum: sum };
+  }
+
+  /** Hiện tổng hiện tại và chỉ cho bấm "Áp dụng" khi tổng đúng 100%. */
+  function updateSplitTotal() {
+    var ok = readSplitInputs().sum === 100;
+    var el = $('splitTotal');
+    el.textContent = ok ? 'Tổng: 100%' : 'Tổng: ' + readSplitInputs().sum + '%. Cần đúng 100% để áp dụng.';
+    el.className = 'text-sm ' + (ok ? 'text-emerald-700' : 'text-amber-700');
+    $('splitApply').disabled = !ok;
+    $('splitApply').classList.toggle('opacity-50', !ok);
+    return ok;
+  }
+
+  function fillSplitInputs() {
+    Object.keys(SPLIT_INPUTS).forEach(function (k) { $(SPLIT_INPUTS[k]).value = String(state.split[k]); });
+    updateSplitTotal();
+  }
+
+  function initSplit() {
+    fillSplitInputs();
+    Object.keys(SPLIT_INPUTS).forEach(function (k) {
+      var el = $(SPLIT_INPUTS[k]);
+      el.addEventListener('input', function () { el.value = digitsOnly(el.value).slice(0, 3); updateSplitTotal(); });
+    });
+    $('splitForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (!updateSplitTotal()) return;
+      state.split = readSplitInputs().values;
+      saveState(); render();
+    });
+    $('splitReset').addEventListener('click', function () {
+      state.split = Object.assign({}, DEFAULT_SPLIT);
+      fillSplitInputs(); saveState(); render();
+    });
+  }
+
+  /* ---------- Tab 2: Mục tiêu & lãi kép ---------- */
+  var MAX_YEARS = 50;
+  var goalChart = null;
+
+  function parseRate(s) {
+    var v = parseFloat(String(s).replace(',', '.'));
+    return isFinite(v) && v >= 0 && v <= 100 ? v : NaN;
+  }
+
+  /**
+   * Tính lãi kép khi gửi đều mỗi tháng cho đến khi chạm mục tiêu.
+   *
+   * Mỗi tháng: số dư mới = số dư cũ × (1 + lãi tháng) + tiền gửi
+   *  - lãi tháng = lãi năm / 100 / 12 (lãi ghép theo tháng)
+   *  - tiền gửi vào cuối tháng nên chưa sinh lãi trong chính tháng đó
+   * Giá trị được ghi vào các mảng ở cuối mỗi năm (và đúng tháng chạm mục tiêu)
+   * để vẽ biểu đồ. Dừng sớm khi đạt mục tiêu, tối đa MAX_YEARS năm.
+   *
+   * @param {number} monthly Số tiền tiết kiệm mỗi tháng (₫)
+   * @param {number} ratePct Lãi suất dự kiến (%/năm), từ 0 đến 100
+   * @param {number} target  Số tiền mục tiêu (₫)
+   * @returns {{labels: string[], assets: number[], deposits: number[],
+   *            reachedMonth: (number|null), balance: number, principal: number}}
+   *   labels: nhãn trục X; assets: tổng tài sản; deposits: tiền gốc đã nộp;
+   *   reachedMonth: tháng chạm mục tiêu (null nếu chưa đạt)
+   */
+  function projectGrowth(monthly, ratePct, target) {
+    var i = ratePct / 100 / 12;
+    var balance = 0, principal = 0, reachedMonth = null;
+    var labels = ['Năm 0'], assets = [0], deposits = [0];
+    for (var m = 1; m <= MAX_YEARS * 12; m++) {
+      balance = balance * (1 + i) + monthly;
+      principal += monthly;
+      var hit = balance >= target;
+      if (m % 12 === 0 || hit) {
+        labels.push('Năm ' + (m % 12 === 0 ? m / 12 : (m / 12).toFixed(1)));
+        assets.push(Math.round(balance));
+        deposits.push(principal);
+      }
+      if (hit) { reachedMonth = m; break; }
+    }
+    return { labels: labels, assets: assets, deposits: deposits,
+             reachedMonth: reachedMonth, balance: balance, principal: principal };
+  }
+
+  function axisLabel(n) {
+    if (n >= 1e9) return (n / 1e9) + ' tỷ';
+    if (n >= 1e6) return (n / 1e6) + ' tr';
+    return fmt.format(n);
+  }
+
+  function drawGoalChart(p, target) {
+    if (typeof Chart === 'undefined') {
+      $('goalError').textContent = 'Không tải được Chart.js. Kiểm tra kết nối mạng rồi tải lại trang.';
+      return;
+    }
+    var targetLine = p.labels.map(function () { return target; });
+    if (goalChart) {
+      goalChart.data.labels = p.labels;
+      goalChart.data.datasets[0].data = p.assets;
+      goalChart.data.datasets[1].data = p.deposits;
+      goalChart.data.datasets[2].data = targetLine;
+      goalChart.update();
+      return;
+    }
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    goalChart = new Chart($('goalChart').getContext('2d'), {
+      type: 'line',
+      data: {
+        labels: p.labels,
+        datasets: [
+          { label: 'Tổng tài sản', data: p.assets, borderColor: '#1b3366', backgroundColor: 'rgba(27,51,102,.10)', fill: true, tension: 0.25, pointRadius: 3 },
+          { label: 'Tiền gốc đã nộp', data: p.deposits, borderColor: '#7f93bd', tension: 0.25, pointRadius: 0, borderWidth: 2 },
+          { label: 'Mục tiêu', data: targetLine, borderColor: '#047857', borderDash: [6, 6], pointRadius: 0, borderWidth: 2 }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: reduce ? false : { duration: 400 },
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'bottom' },
+          tooltip: { callbacks: { label: function (c) { return c.dataset.label + ': ' + money(c.parsed.y); } } }
+        },
+        scales: {
+          y: { beginAtZero: true, ticks: { callback: axisLabel } },
+          x: { ticks: { maxTicksLimit: 10 } }
+        }
+      }
+    });
+  }
+
+  function renderGoals() {
+    var g = state.goal;
+    if (!(g.target > 0 && g.monthly > 0 && isFinite(g.rate))) return;
+    var p = projectGrowth(g.monthly, g.rate, g.target);
+    var name = g.name || 'Mục tiêu của bạn';
+    $('goalTitle').textContent = name;
+
+    if (p.reachedMonth) {
+      var y = Math.floor(p.reachedMonth / 12), mo = p.reachedMonth % 12;
+      var when = (y ? y + ' năm ' : '') + (mo ? mo + ' tháng' : '');
+      $('goalResult').textContent = 'Bạn chạm mốc ' + money(g.target) + ' sau khoảng ' + when.trim() + '.';
+    } else {
+      $('goalResult').textContent = 'Với mức này, bạn chưa chạm mốc ' + money(g.target) + ' sau ' + MAX_YEARS + ' năm. Hãy tăng số tiền tiết kiệm mỗi tháng.';
+    }
+    $('statPrincipal').textContent = money(p.principal);
+    $('statInterest').textContent = money(Math.max(0, p.balance - p.principal));
+    $('statTotal').textContent = money(p.balance);
+    $('goalStats').classList.remove('hidden');
+    drawGoalChart(p, g.target);
+  }
+
+  // Chỉ vẽ/resize khi tab đang hiển thị để canvas có kích thước thật.
+  function onGoalsShown() {
+    requestAnimationFrame(function () {
+      renderGoals();
+      if (goalChart) goalChart.resize();
+    });
+  }
+
+  function bindRateInput(el) {
+    el.addEventListener('input', function () {
+      var v = el.value.replace(/[^\d.,]/g, '');
+      var idx = v.search(/[.,]/);
+      if (idx > -1) v = v.slice(0, idx + 1) + v.slice(idx + 1).replace(/[.,]/g, '');
+      el.value = v.slice(0, 6);
+    });
+  }
+
+  function initGoals() {
+    bindMoneyInput($('goalTarget'));
+    bindMoneyInput($('goalMonthly'));
+    bindRateInput($('goalRate'));
+
+    var g = state.goal;
+    $('goalName').value = g.name;
+    if (g.target > 0) $('goalTarget').value = fmt.format(g.target);
+    if (g.monthly > 0) $('goalMonthly').value = fmt.format(g.monthly);
+    if (g.target > 0 || g.monthly > 0 || g.rate > 0) $('goalRate').value = String(g.rate).replace('.', ',');
+
+    $('goalForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var target = toNumber($('goalTarget').value);
+      var monthly = toNumber($('goalMonthly').value);
+      var rate = parseRate($('goalRate').value);
+      var err = $('goalError');
+      if (target <= 0) { err.textContent = 'Nhập số tiền cần đạt lớn hơn 0.'; $('goalTarget').focus(); return; }
+      if (monthly <= 0) { err.textContent = 'Nhập số tiền tiết kiệm mỗi tháng lớn hơn 0.'; $('goalMonthly').focus(); return; }
+      if (isNaN(rate)) { err.textContent = 'Lãi suất phải là số từ 0 đến 100.'; $('goalRate').focus(); return; }
+      err.textContent = '';
+      state.goal = { name: $('goalName').value.trim().slice(0, 40), target: target, monthly: monthly, rate: rate };
+      saveState();
+      renderGoals();
+    });
+  }
+
+  /* ---------- Tab 3: Danh mục đầu tư ---------- */
+  var FETCH_TIMEOUT_MS = 8000;
+  var AUTO_REFRESH_MS = 5 * 60 * 1000;
+  var CONCURRENCY = 4;        // Số mã gọi API cùng lúc, tránh bị giới hạn request
+  var lastFetchAt = 0;
+  var fetching = false;
+  var pendingSyms = [];       // Mã thêm vào khi đang tải, sẽ tải ở lượt kế tiếp
+  var renderPending = false;  // Hoãn vẽ lại bảng khi người dùng đang gõ
+  var editing = {};           // { MÃ: true } hàng đang ở chế độ sửa (chỉ trong phiên)
+  var fetchFailed = {};       // { MÃ: true } lần lấy giá gần nhất thất bại => hiện ô nhập tay
+
+  /** Chuẩn hóa mã: viết hoa, chỉ nhận chữ/số, 2-10 ký tự. Trả '' nếu không hợp lệ. */
+  function normalizeSymbol(raw) {
+    var sym = String(raw || '').trim().toUpperCase();
+    return /^[A-Z0-9]{2,10}$/.test(sym) ? sym : '';
+  }
+
+  function findStock(sym) {
+    return state.stocks.find(function (x) { return x.symbol === sym; }) || null;
+  }
+
+  /** URL thực tế để gọi: bọc qua CORS_PROXY (nếu có) vì trình duyệt không gọi thẳng được TCBS. */
+  function buildRequestUrl(sym) {
+    var target = PRICE_URL(sym);
+    return CORS_PROXY ? CORS_PROXY + encodeURIComponent(target) : target;
+  }
+
+  /**
+   * Tìm "giá hiện tại" trong JSON: ưu tiên các trường trong PRICE_KEYS ở cấp hiện tại,
+   * nếu không có thì tìm sâu vào các đối tượng con (tối đa 3 cấp, ví dụ { data: { price } }).
+   * @returns {number} Giá > 0, hoặc NaN nếu không tìm thấy
+   */
+  function pickPrice(node, depth) {
+    depth = depth || 0;
+    if (!node || typeof node !== 'object' || depth > 3) return NaN;
+    for (var i = 0; i < PRICE_KEYS.length; i++) {
+      var v = Number(node[PRICE_KEYS[i]]);
+      if (isFinite(v) && v > 0) return v;
+    }
+    var keys = Object.keys(node);
+    for (var j = 0; j < keys.length; j++) {
+      var child = node[keys[j]];
+      if (child && typeof child === 'object') {
+        var r = pickPrice(child, depth + 1);
+        if (isFinite(r)) return r;
+      }
+    }
+    return NaN;
+  }
+
+  /**
+   * Lấy giá hiện tại của MỘT mã từ API công khai của TCBS.
+   * Luồng: fetch (qua CORS_PROXY, có timeout) -> bóc JSON (allorigins /get bọc kết quả trong
+   * { contents: "<chuỗi JSON>", status: {...} }) -> pickPrice() -> nhân PRICE_SCALE.
+   * Ném lỗi có mã để nơi gọi báo đúng nguyên nhân:
+   * TIMEOUT, NETWORK (mạng/CORS), RATE_LIMIT (429), HTTP_xxx, UPSTREAM_xxx, BAD_JSON, NO_DATA, NO_PRICE.
+   * @param {string} sym Mã cổ phiếu, ví dụ 'HPG'
+   * @returns {Promise<number>} Giá (₫)
+   */
+  async function fetchOnePrice(sym) {
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, FETCH_TIMEOUT_MS);
+    try {
+      var res = await fetch(buildRequestUrl(sym), { signal: ctrl.signal });
+      if (res.status === 429) throw new Error('RATE_LIMIT');
+      if (!res.ok) throw new Error('HTTP_' + res.status);
+      var data = await res.json();
+
+      if (data && Object.prototype.hasOwnProperty.call(data, 'contents')) {
+        var up = data.status && data.status.http_code;
+        if (up === 429) throw new Error('RATE_LIMIT');
+        if (up && up >= 400) throw new Error('UPSTREAM_' + up);
+        if (typeof data.contents !== 'string' || !data.contents) throw new Error('NO_DATA');
+        data = JSON.parse(data.contents);
+      }
+
+      var price = pickPrice(data, 0) * PRICE_SCALE;
+      if (!isFinite(price) || price <= 0) {
+        // Giúp bạn chọn đúng tên trường: mở Console (F12) để xem API trả về những trường nào
+        console.warn('Không thấy trường giá cho ' + sym + '. Các trường có trong phản hồi:', data && typeof data === 'object' ? Object.keys(data) : data);
+        throw new Error('NO_PRICE');
+      }
+      return Math.round(price);
+    } catch (e) {
+      if (e && e.name === 'AbortError') throw new Error('TIMEOUT');
+      if (e instanceof SyntaxError) throw new Error('BAD_JSON');
+      if (e instanceof TypeError) throw new Error('NETWORK');
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function setStockStatus(msg, tone) {
+    var el = $('stockStatus');
+    el.textContent = msg;
+    el.className = 'text-sm min-h-[1.25rem] ' + (tone === 'warn' ? 'text-amber-700' : tone === 'ok' ? 'text-emerald-700' : 'text-navy-600');
+  }
+
+  /**
+   * Cập nhật giá cho các mã trong danh mục (hoặc chỉ các mã trong `only`).
+   * Lặp qua mảng mã đã lưu, gọi theo từng nhóm CONCURRENCY mã; mỗi mã có try/catch riêng
+   * nên một mã lỗi không ảnh hưởng mã khác. Mã thành công: ghi giá + nguồn 'api'.
+   * Mã lỗi: đánh dấu fetchFailed để bảng hiện ô nhập giá tay.
+   * @param {string[]} [only] Danh sách mã cần cập nhật; bỏ trống = toàn bộ danh mục
+   */
+  async function fetchStockPrices(only) {
+    var list = Array.isArray(only) ? only : state.stocks.map(function (x) { return x.symbol; });
+    if (!list.length) { setStockStatus('Danh mục đang trống. Thêm mã cổ phiếu để bắt đầu.', 'info'); return; }
+    if (fetching) { pendingSyms = pendingSyms.concat(list); return; }
+
+    fetching = true;
+    lastFetchAt = Date.now();
+    var btn = $('refreshPrices');
+    btn.disabled = true; btn.textContent = 'Đang cập nhật…';
+    setStockStatus('Đang lấy giá thị trường…', 'info');
+
+    var ok = 0, failed = [], reasons = {};
+    for (var i = 0; i < list.length; i += CONCURRENCY) {
+      var chunk = list.slice(i, i + CONCURRENCY);
+      var results = await Promise.all(chunk.map(async function (sym) {
+        try { return { sym: sym, price: await fetchOnePrice(sym) }; }
+        catch (e) { return { sym: sym, err: (e && e.message) || 'UNKNOWN' }; }
+      }));
+      results.forEach(function (r) {
+        var st = findStock(r.sym);
+        if (!st) return; // mã đã bị xóa trong lúc đang tải
+        if (r.price) { st.price = r.price; st.source = 'api'; delete fetchFailed[r.sym]; ok++; }
+        else { fetchFailed[r.sym] = true; failed.push(r.sym); reasons[r.err] = true; }
+      });
+    }
+    saveState();
+    renderStockTableSafe();
+
+    if (failed.length) {
+      var why = reasons.RATE_LIMIT ? 'API đang giới hạn số request.' :
+                reasons.TIMEOUT ? 'API phản hồi quá chậm.' :
+                reasons.NETWORK ? 'Không kết nối được (mạng hoặc bị chặn CORS).' :
+                reasons.NO_PRICE ? 'Dữ liệu trả về không có trường giá.' : 'API trả dữ liệu không dùng được.';
+      setStockStatus('Đã cập nhật ' + ok + '/' + list.length + ' mã. ' + why + ' Mã chưa có giá: ' + failed.join(', ') + '. Hãy nhập giá thị trường vào ô trong bảng.', 'warn');
+    } else {
+      setStockStatus('Đã cập nhật giá ' + ok + ' mã.', 'ok');
+    }
+    btn.disabled = false; btn.textContent = 'Cập nhật giá';
+    fetching = false;
+
+    if (pendingSyms.length) {
+      var next = pendingSyms.filter(function (v, idx, arr) { return arr.indexOf(v) === idx; });
+      pendingSyms = [];
+      fetchStockPrices(next);
+    }
+  }
+
+  function plClass(v) { return v > 0 ? 'text-emerald-700' : v < 0 ? 'text-red-600' : 'text-navy-800'; }
+  function pctText(v) { return (v > 0 ? '+' : '') + v.toFixed(2).replace('.', ',') + '%'; }
+
+  /** Ô nhập số trong bảng (giá vốn, số lượng, giá tay): tự định dạng, chỉ nhận số. */
+  function makeNumInput(label, sym, value, placeholder) {
+    var inp = document.createElement('input');
+    inp.type = 'text'; inp.inputMode = 'numeric'; inp.autocomplete = 'off';
+    inp.placeholder = placeholder || '';
+    inp.setAttribute('aria-label', label + ' ' + sym);
+    inp.className = 'w-full min-w-[96px] rounded-lg border border-navy-200 px-2.5 py-2 focus:border-navy-600';
+    if (value > 0) inp.value = fmt.format(value);
+    bindMoneyInput(inp);
+    return inp;
+  }
+
+  function makeBtn(text, cls) {
+    var b = document.createElement('button');
+    b.type = 'button'; b.textContent = text;
+    b.className = 'rounded-md px-3 py-1.5 text-sm font-medium ' + cls;
+    return b;
+  }
+
+  /** Dựng một hàng của bảng cho một mã (chế độ xem hoặc chế độ sửa). */
+  function buildStockRow(s) {
+    var isEdit = !!editing[s.symbol];
+    var tr = document.createElement('tr');
+    // data-label: nhãn khi bảng chuyển thành thẻ trên điện thoại; data-col: để CSS bố trí lưới
+    var cell = function (label, col, cls) {
+      var td = document.createElement('td');
+      td.className = cls;
+      if (label) td.dataset.label = label;
+      if (col) td.dataset.col = col;
+      tr.appendChild(td);
+      return td;
+    };
+
+    var tdSym = cell('', 'sym', 'px-4 py-2 font-semibold');
+    tdSym.textContent = s.symbol;
+
+    var tdAvg = cell('Giá vốn (₫)', '', 'px-2 py-2');
+    var tdQty = cell('Số lượng', '', 'px-2 py-2');
+    var avgInp = null, qtyInp = null;
+    if (isEdit) {
+      avgInp = makeNumInput('Giá vốn', s.symbol, s.avg, '27.500');
+      qtyInp = makeNumInput('Số lượng', s.symbol, s.qty, '100');
+      tdAvg.appendChild(avgInp); tdQty.appendChild(qtyInp);
+      // Ghi ngay vào state khi gõ để dữ liệu không mất nếu bảng được vẽ lại
+      avgInp.addEventListener('input', function () { s.avg = toNumber(avgInp.value); saveState(); });
+      qtyInp.addEventListener('input', function () { s.qty = toNumber(qtyInp.value); saveState(); });
+    } else {
+      tdAvg.textContent = s.avg > 0 ? fmt.format(s.avg) : '–';
+      tdQty.textContent = s.qty > 0 ? fmt.format(s.qty) : '–';
+    }
+
+    // Giá hiện tại: hiện chữ khi đã có giá từ API/tay; hiện ô nhập tay khi lấy giá lỗi, chưa có giá, hoặc đang sửa
+    var tdPrice = cell('Giá hiện tại (₫)', '', 'px-2 py-2');
+    var priceInp = null;
+    if (isEdit || fetchFailed[s.symbol] || s.price <= 0) {
+      priceInp = makeNumInput('Giá thị trường', s.symbol, s.price, 'Nhập giá tay');
+      if (!isEdit) priceInp.classList.replace('border-navy-200', s.price > 0 ? 'border-navy-200' : 'border-amber-500');
+      tdPrice.appendChild(priceInp);
+      if (!isEdit) {
+        priceInp.addEventListener('change', function () {
+          s.price = toNumber(priceInp.value);
+          s.source = s.price > 0 ? 'manual' : '';
+          if (s.price > 0) delete fetchFailed[s.symbol];
+          saveState(); renderStockTable();
+        });
+      }
+    } else {
+      var priceText = document.createElement('span');
+      priceText.className = 'font-medium';
+      priceText.textContent = fmt.format(s.price);
+      tdPrice.appendChild(priceText);
+    }
+    var badge = document.createElement('span');
+    badge.className = 'block text-xs text-navy-500 mt-0.5';
+    badge.textContent = s.source === 'api' ? 'Tự động' : s.source === 'manual' ? 'Nhập tay' : 'Chưa có giá';
+    tdPrice.appendChild(badge);
+
+    // % Lãi/Lỗ = (Giá hiện tại - Giá vốn) / Giá vốn x 100; xanh nếu lãi, đỏ nếu lỗ
+    var tdPL = cell('% Lãi/Lỗ', '', 'px-2 py-2');
+    if (s.price > 0 && s.avg > 0) {
+      var pct = (s.price - s.avg) / s.avg * 100;
+      tdPL.className = 'px-2 py-2 ' + plClass(pct);
+      var a = document.createElement('div'); a.className = 'font-semibold'; a.textContent = pctText(pct);
+      tdPL.appendChild(a);
+      if (s.qty > 0) {
+        var amt = (s.price - s.avg) * s.qty;
+        var b = document.createElement('div'); b.className = 'text-xs';
+        b.textContent = (amt > 0 ? '+' : amt < 0 ? '−' : '') + money(Math.abs(amt));
+        tdPL.appendChild(b);
+      }
+    } else {
+      tdPL.className = 'px-2 py-2 text-navy-500';
+      tdPL.textContent = '–';
+    }
+
+    var tdAct = cell('', 'act', 'px-4 py-2');
+    var wrap = document.createElement('div'); wrap.className = 'flex gap-2';
+    var del = makeBtn('Xóa', 'border border-red-200 text-red-600 hover:bg-red-50');
+    del.setAttribute('aria-label', 'Xóa ' + s.symbol);
+    del.addEventListener('click', function () {
+      if (!confirm('Xóa ' + s.symbol + ' khỏi danh mục?')) return;
+      state.stocks = state.stocks.filter(function (x) { return x.symbol !== s.symbol; });
+      delete editing[s.symbol]; delete fetchFailed[s.symbol];
+      saveState(); renderStockTable();
+    });
+    if (isEdit) {
+      var save = makeBtn('Lưu', 'bg-navy-700 hover:bg-navy-800 text-white');
+      save.addEventListener('click', function () {
+        if (priceInp) {
+          var np = toNumber(priceInp.value);
+          if (np !== s.price) { s.price = np; s.source = np > 0 ? 'manual' : ''; }
+          if (np > 0) delete fetchFailed[s.symbol];
+        }
+        delete editing[s.symbol];
+        saveState(); renderStockTable();
+      });
+      [avgInp, qtyInp, priceInp].forEach(function (inp) {
+        if (inp) inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') save.click(); });
+      });
+      wrap.appendChild(save);
+    } else {
+      var edit = makeBtn('Sửa', 'border border-navy-200 text-navy-700 hover:bg-navy-50');
+      edit.setAttribute('aria-label', 'Sửa ' + s.symbol);
+      edit.addEventListener('click', function () { editing[s.symbol] = true; renderStockTable(); });
+      wrap.appendChild(edit);
+    }
+    wrap.appendChild(del);
+    tdAct.appendChild(wrap);
+    return tr;
+  }
+
+  /** Vẽ lại toàn bộ bảng và dòng tổng từ state.stocks. */
+  function renderStockTable() {
+    var body = $('stockBody');
+    body.innerHTML = '';
+    $('stockEmpty').classList.toggle('hidden', state.stocks.length > 0);
+    $('stockTableWrap').classList.toggle('hidden', state.stocks.length === 0);
+
+    var totCost = 0, totValue = 0, costPriced = 0;
+    state.stocks.forEach(function (s) {
+      body.appendChild(buildStockRow(s));
+      var cost = s.avg * s.qty;
+      totCost += cost;
+      if (s.price > 0) { totValue += s.price * s.qty; costPriced += cost; }
+    });
+
+    $('totCost').textContent = totCost > 0 ? money(totCost) : '–';
+    $('totValue').textContent = totValue > 0 ? money(totValue) : '–';
+    var box = $('totPL');
+    if (costPriced > 0) {
+      var tp = (totValue - costPriced) / costPriced * 100;
+      box.className = 'px-2 py-3 ' + plClass(tp);
+      box.textContent = pctText(tp);
+    } else { box.className = 'px-2 py-3 text-navy-500'; box.textContent = '–'; }
+  }
+
+  /** Như renderStockTable nhưng hoãn nếu người dùng đang gõ trong bảng (tránh mất con trỏ). */
+  function renderStockTableSafe() {
+    var a = document.activeElement;
+    if (a && a.tagName === 'INPUT' && $('stockBody').contains(a)) { renderPending = true; return; }
+    renderStockTable();
+  }
+
+  /** Thêm mã mới vào mảng danh mục, lưu localStorage, mở sẵn chế độ nhập giá vốn/số lượng rồi lấy giá mã đó. */
+  function addSymbol(raw) {
+    var err = $('stockAddError');
+    var sym = normalizeSymbol(raw);
+    if (!sym) { err.textContent = 'Mã chỉ gồm chữ và số (2-10 ký tự), ví dụ FPT, HPG.'; return; }
+    if (findStock(sym)) { err.textContent = sym + ' đã có trong danh mục.'; return; }
+    if (state.stocks.length >= MAX_SYMBOLS) { err.textContent = 'Danh mục tối đa ' + MAX_SYMBOLS + ' mã. Hãy xóa bớt trước khi thêm.'; return; }
+    err.textContent = '';
+    state.stocks.push({ symbol: sym, avg: 0, qty: 0, price: 0, source: '' });
+    editing[sym] = true;
+    saveState();
+    $('symbolInput').value = '';
+    renderStockTable();
+    fetchStockPrices([sym]);
+  }
+
+  // Tự cập nhật giá khi mở tab nếu lần trước đã quá AUTO_REFRESH_MS
+  function onStocksShown() {
+    if (state.stocks.length && Date.now() - lastFetchAt > AUTO_REFRESH_MS) fetchStockPrices();
+  }
+
+  function initStocks() {
+    $('addStockForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      addSymbol($('symbolInput').value);
+    });
+    $('symbolInput').addEventListener('input', function () {
+      this.value = this.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+    });
+    $('refreshPrices').addEventListener('click', function () { fetchStockPrices(); });
+    // Vẽ lại bảng đang bị hoãn sau khi người dùng rời khỏi ô nhập (trừ khi chỉ chuyển sang ô khác trong bảng)
+    $('stockBody').addEventListener('focusout', function () {
+      setTimeout(function () {
+        var a = document.activeElement;
+        if (a && a.tagName === 'INPUT' && $('stockBody').contains(a)) return;
+        if (renderPending) { renderPending = false; renderStockTable(); }
+      }, 0);
+    });
+    renderStockTable();
+  }
+
+  // Link affiliate còn để "#" thì chặn hành vi cuộn lên đầu trang cho đến khi bạn chèn link thật
+  function initAffiliateLinks() {
+    document.querySelectorAll('.affLink').forEach(function (a) {
+      a.addEventListener('click', function (e) {
+        if (a.getAttribute('href') === '#') e.preventDefault();
+      });
+    });
+  }
+
+  /* ---------- Sự kiện ---------- */
+  function init() {
+    buildNav();
+    showTab('budget');
+    initGoals();
+    initStocks();
+    initAffiliateLinks();
+    initSplit();
+
+    bindMoneyInput($('openingInput'));
+    bindMoneyInput($('amountInput'));
+    $('dateInput').value = todayISO();
+    if (state.opening > 0) $('openingInput').value = fmt.format(state.opening);
+
+    document.querySelectorAll('.typeBtn').forEach(function (b) {
+      b.addEventListener('click', function () { setType(b.dataset.type); });
+    });
+    setType('expense');
+
+    $('openingForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      state.opening = toNumber($('openingInput').value);
+      if (saveState()) { showError(''); }
+      render();
+    });
+
+    $('txForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var amount = toNumber($('amountInput').value);
+      var date = $('dateInput').value;
+      if (amount <= 0) { showError('Nhập số tiền lớn hơn 0.'); $('amountInput').focus(); return; }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { showError('Chọn ngày hợp lệ.'); return; }
+
+      state.transactions.push({
+        id: newId(),
+        type: currentType,
+        amount: amount,
+        group: currentType === 'expense' ? $('groupSelect').value : null,
+        note: $('noteInput').value.trim().slice(0, 80),
+        date: date
+      });
+      if (saveState()) { showError(''); }
+      $('amountInput').value = '';
+      $('noteInput').value = '';
+      $('amountInput').focus();
+      render();
+    });
+
+    $('clearAll').addEventListener('click', function () {
+      if (!confirm('Xóa toàn bộ lịch sử thu/chi? Thao tác này không thể hoàn tác.')) return;
+      state.transactions = [];
+      saveState(); render();
+    });
+
+    render();
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
